@@ -10,6 +10,17 @@ or
     
     easy_install pyserial
 
+### Tester
+I added a file to control the roomba with the wasd-keys. For that you also need pygame installed.
+Just run 
+
+    python game.py
+    
+and a window will pop up where you can control the Roomba with wasd (and esc to exit). It also prints
+some stuff into the shell for debugging.
+
+### Use as library
+
 The main class is create.py which contains everything to talk to the Roomba. To use it write sth like:
 
     import create
