@@ -9,7 +9,7 @@
 # starts a pygame window from which the 
 # Roomba can be controlled with w/a/s/d.
 # Use this file to play with the sensors.
-
+import os
 import pygame
 import create
 import time
@@ -25,8 +25,25 @@ robot.toSafeMode()
 #robot.printSensors()
 
 pygame.init()
-size = width, height = 320, 240
-pygame.display.set_mode(size)
+size = width, height = 800, 600
+screen = pygame.display.set_mode(size)
+pygame.display.set_caption('Roomba Test')
+
+img_roomba_top = pygame.image.load(os.path.join('img', 'roomba.png'))
+
+# Fill background
+background = pygame.Surface(screen.get_size())
+background = background.convert()
+background.fill((250, 250, 250))
+
+# Display some text
+#font = pygame.font.Font(None, 18)
+font = pygame.font.SysFont("calibri",16)
+
+# Blit everything to the screen
+screen.blit(background, (0, 0))
+pygame.display.flip()
+
 
 MAX_FORWARD = 500
 MAX_ROTATION = 2000
@@ -48,9 +65,9 @@ lb_right = robot.senseFunc(create.LIGHTBUMP_RIGHT)
 robot.resetPose()
 
 while True:
-	senses = robot.sensors([create.WALL_SIGNAL, create.WALL_IR_SENSOR, create.LEFT_BUMP, create.RIGHT_BUMP, create.POSE])
-	x,y,th = robot.getPose()	
-	print ("{} {} {} {} {} {}".format(lb_left(), lb_front_left(), lb_center_left(), lb_center_right(), lb_front_right(), lb_right()) )
+	senses = robot.sensors([create.WALL_SIGNAL, create.WALL_IR_SENSOR, create.LEFT_BUMP, create.RIGHT_BUMP, create.POSE, create.ENCODER_LEFT, create.ENCODER_RIGHT, create.CLIFF_LEFT_SIGNAL, create.CLIFF_FRONT_LEFT_SIGNAL, create.CLIFF_FRONT_RIGHT_SIGNAL, create.CLIFF_RIGHT_SIGNAL])
+	
+	
 	#print ("wall {}, wall_ir {}".format(wall_fun(), wall_ir()))
 	# if wall_ir() >0:
 	# 	print ("Wall in {}".format(wall_fun()))
@@ -95,4 +112,35 @@ while True:
 	if update_roomba == True:		
 		robot.go(robot_dir,robot_rot)
 		time.sleep(0.2)
+
+	# done with the actual roomba stuff
+	# now print.
+
+	screen.blit(background, (0, 0))
+	screen.blit(img_roomba_top, (0,0))
+	#Light Bump
+	screen.blit(font.render("{}".format(lb_left()), 1, (10, 10, 10)), (112, 136))
+	screen.blit(font.render("{}".format(lb_front_left()), 1, (10, 10, 10)), (159, 62))
+	screen.blit(font.render("{}".format(lb_center_left()), 1, (10, 10, 10)), (228, 19))
+
+	screen.blit(font.render("{}".format(lb_center_right()), 1, (10, 10, 10)), (457, 19))
+	screen.blit(font.render("{}".format(lb_front_right()), 1, (10, 10, 10)), (484, 54))
+	screen.blit(font.render("{}".format(lb_right()), 1, (10, 10, 10)), (469, 115))
+	#Wall Sensors
+	screen.blit(font.render("{}".format(senses[create.WALL_IR_SENSOR]), 1, (10, 10, 10)), (376, 396))
+	screen.blit(font.render("{}".format(senses[create.WALL_SIGNAL]), 1, (10, 10, 10)), (376, 416))
+	#Bumpers
+	screen.blit(font.render("{}".format(senses[create.LEFT_BUMP]), 1, (10, 10, 10)), (142, 396))
+	screen.blit(font.render("{}".format(senses[create.RIGHT_BUMP]), 1, (10, 10, 10)), (142, 416))
+	#Encoders
+	screen.blit(font.render("{}".format(senses[create.ENCODER_LEFT]), 1, (10, 10, 10)), (635, 396))
+	screen.blit(font.render("{}".format(senses[create.ENCODER_RIGHT]), 1, (10, 10, 10)), (635, 416))
+	#Cliff Sensors
+	screen.blit(font.render("{}".format(senses[create.CLIFF_LEFT_SIGNAL]), 1, (10, 10, 10)), (635, 16))
+	screen.blit(font.render("{}".format(senses[create.CLIFF_FRONT_LEFT_SIGNAL]), 1, (10, 10, 10)), (635, 35))
+	screen.blit(font.render("{}".format(senses[create.CLIFF_FRONT_RIGHT_SIGNAL]), 1, (10, 10, 10)), (635, 54))
+	screen.blit(font.render("{}".format(senses[create.CLIFF_RIGHT_SIGNAL]), 1, (10, 10, 10)), (635, 73))
+
+
+	pygame.display.flip()
 		
