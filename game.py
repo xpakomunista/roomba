@@ -39,7 +39,7 @@ background.fill((250, 250, 250))
 # Display some text
 #font = pygame.font.Font(None, 18)
 font = pygame.font.SysFont("calibri",16)
-
+font_big = pygame.font.SysFont("calibri",32)
 # Blit everything to the screen
 screen.blit(background, (0, 0))
 pygame.display.flip()
@@ -141,6 +141,7 @@ while True:
 	screen.blit(font.render("{}".format(senses[create.CLIFF_FRONT_RIGHT_SIGNAL]), 1, (10, 10, 10)), (635, 54))
 	screen.blit(font.render("{}".format(senses[create.CLIFF_RIGHT_SIGNAL]), 1, (10, 10, 10)), (635, 73))
 
+	screen.blit(font_big.render("Move Roomba with w/a/s/d and ESC to quit.", 1, (10, 10, 10)), (50, 500))
 
 	pygame.display.flip()
 		
