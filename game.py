@@ -141,6 +141,16 @@ while True:
 	screen.blit(font.render("{}".format(senses[create.CLIFF_FRONT_RIGHT_SIGNAL]), 1, (10, 10, 10)), (635, 54))
 	screen.blit(font.render("{}".format(senses[create.CLIFF_RIGHT_SIGNAL]), 1, (10, 10, 10)), (635, 73))
 
+	screen.blit(font.render("Distance: {}".format(senses[create.DISTANCE]), 1, (10, 10, 10)), (50, 450))
+	screen.blit(font.render("Angle: {}".format(senses[create.ANGLE]), 1, (10, 10, 10)), (50, 470))
+	screen.blit(font.render("Angle: {}".format(senses[create.ANGLE]), 1, (10, 10, 10)), (50, 470))
+
+	px, py, th = robot.getPose()
+	screen.blit(font.render(" x: {}".format(px), 1, (10, 10, 10)), (250, 450))
+	screen.blit(font.render(" y: {}".format(py), 1, (10, 10, 10)), (250, 470))
+	screen.blit(font.render("th: {}".format(th), 1, (10, 10, 10)), (250, 490))
+
+
 	screen.blit(font_big.render("Move Roomba with w/a/s/d and ESC to quit.", 1, (10, 10, 10)), (50, 500))
 
 	pygame.display.flip()

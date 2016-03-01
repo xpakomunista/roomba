@@ -129,6 +129,11 @@ SENSOR_DATA_WIDTH = [0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,2,2,1,2,2,1,2,2,2,2,2
 
 #The original value was 258.0 but my roomba has 235.0
 WHEEL_SPAN = 235.0
+WHEEL_DIAMETER = 72.0
+TICK_PER_REVOLUTION = 508.8
+TICK_PER_MM_LEFT = TICK_PER_REVOLUTION/(math.pi*WHEEL_DIAMETER)
+TICK_PER_MM_RIGHT = TICK_PER_REVOLUTION/(math.pi*WHEEL_DIAMETER)
+
 
 # for printing the SCI modes
 def modeStr( mode ):
@@ -223,132 +228,6 @@ def _toTwosComplement2Bytes( value ):
     
     return ( (eqBitVal >> 8) & 0xFF, eqBitVal & 0xFF )
 
-def _poseDeltaFromVelRadSec( vel_mm_sec, ROC, sec ):
-    """ returns the pose change (dx,dy,dthr) in (mm,mm,radians)
-    undergone by a differential-drive robot
-    with a wheelspan of 258mm that is traveling with
-    a "velocity" of vel_mm_sec, along a radius of
-    ROC_mm, for sec seconds
-    
-    NOTE that the pose change is represented in the canonical
-    "robot-centric" coordinate system:
-    
-    Hooray for ASCII art!
-    
-    | +x         aligned to robot's heading
-    |
-    ^   |   ^
-    |   |   |
-    +y <---WL--+--WR--- -y  perp to robot's heading
-    |
-    |            DELTA = 1/2 distance from WL to WR
-    | -x
-    
-    vel_mm_sec is the average of the velocities of WL and WR
-    it is positive when the robot is moving forward
-    
-    the center of the robot's circular arc is at (0,ROC)
-    positive ROC => turning to the left
-    negative ROC => turning to the right
-    
-    Special cases: ROC ==  1    => counterclockwise
-    ROC == -1    => clockwise
-    ROC == 32768 => straight
-    """
-    # the robot moves along the arc of a circle
-    #
-    #     the robot's position after the arc is
-    #     (0,ROC) + (ROC*sin(thr),-ROC*cos(thr))
-    #
-    # so we first find thr
-    #
-    # handle special cases
-    #
-    
-    DELTA = WHEEL_SPAN/2.0   # there are 258 mm between the roomba's wheels
-    
-    if ROC == 32768:
-        # going straight, so the wheels have equal velocities
-        # and there is no angular change
-        thr_delta = 0.0
-        x_delta = vel_mm_sec * sec   # D = RT in action!
-        y_delta = 0.0
-    
-    elif ROC == 1 or ROC == 0:
-        # turning in place counterclockwise = positive thr_delta
-        x_delta = 0.0
-        y_delta = 0.0
-        # to do - check if the sign of vel_mm_sec matters!
-        thr_delta = (vel_mm_sec * sec)/float(DELTA)
-    
-    elif ROC == -1:
-        # turning in place counterclockwise = positive thr_delta
-        x_delta = 0.0
-        y_delta = 0.0
-        # to do - check if the sign of vel_mm_sec matters!
-        thr_delta = - ( (vel_mm_sec * sec)/float(DELTA) )
-    
-    else:
-        # general case
-        # how much distance did the center travel
-        # the specification is not 100% clear whether vel_mm_sec
-        # is the average velocity (signed) or speed (unsigned)
-        # of the wheels... we need to test this!
-        
-        # we assume average speed (unsigned) for now...
-        # we handle the case where vel_mm_sec and ROC are both > 0
-        #    and then check for signs later...
-        pos_vel_mm_sec = math.fabs(vel_mm_sec)
-        pos_ROC = math.fabs(ROC)
-        
-        # need to switch the sign of the left wheel when the ROC < DELTA
-        if DELTA <= pos_ROC:
-            # both wheels are going the same direction
-            # center is traveling at pos_vel_mm_sec
-            # center is traveling at a radians/second
-            a =  pos_vel_mm_sec / pos_ROC
-        else:
-            # wheels going in opposite directions
-            # center is traveling at a radians/second
-            a = pos_vel_mm_sec / DELTA
-    
-    # we find the total (positive) angle traveled, pos_thr
-    pos_thr = a * sec
-    
-    # we handle four different cases
-    
-    # case 1: ROC >= 0 and vel_mm_sec >= 0  (forward left)
-    if ROC >= 0 and vel_mm_sec >= 0:
-        thr_delta = pos_thr
-        # (0,ROC) + (ROC*sin(thr_delta),-ROC*cos(thr_delta))
-        x_delta = 0.0 + ROC*math.sin(thr_delta)
-        y_delta = ROC - ROC*math.cos(thr_delta)
-    
-    # case 2: ROC <  0 and vel_mm_sec >= 0  (forward right)
-    if ROC <  0 and vel_mm_sec >= 0:
-        thr_delta = -pos_thr
-        # (0,ROC) + (ROC*sin(thr_delta),-ROC*cos(thr_delta))
-        x_delta = 0.0 + ROC*math.sin(thr_delta)
-        y_delta = ROC - ROC*math.cos(thr_delta)
-    
-    # case 3: ROC >= 0 and vel_mm_sec <  0  (backward left)
-    if ROC >= 0 and vel_mm_sec <  0:
-        thr_delta = -pos_thr
-        # (0,ROC) + (ROC*sin(thr_delta),-ROC*cos(thr_delta))
-        x_delta = 0.0 + ROC*math.sin(thr_delta)
-        y_delta = ROC - ROC*math.cos(thr_delta)
-    
-    # case 4: ROC <  0 and vel_mm_sec <  0  (backward right)
-    if ROC <  0 and vel_mm_sec <  0:
-        thr_delta = pos_thr
-        # (0,ROC) + (ROC*sin(thr_delta),-ROC*cos(thr_delta))
-        x_delta = 0.0 + ROC*math.sin(thr_delta)
-        y_delta = ROC - ROC*math.cos(thr_delta)
-
-    
-    return (x_delta, y_delta, thr_delta)
-
-
 #
 # this class represents a snapshot of the robot's data
 #
@@ -359,9 +238,6 @@ class SensorFrame:
     
     def __init__(self):
         """ constructor -- set all fields to 0
-        
-        see _interpretSensorString for details
-        on all of these fields
         """
         self.casterDrop = 0
         self.leftWheelDrop = 0
@@ -611,10 +487,11 @@ class Create:
         # here are the variables that constitute the robot's
         # estimated odometry, thr is theta in radians...
         # these are updated by integrateNextOdometricStep
-        # which is called in _interpretSensorString
         self.xPose =   0.0
         self.yPose =   0.0
         self.thrPose = 0.0
+        self.leftEncoder = -1
+        self.rightEncoder = -1
         
         time.sleep(0.3)
         self._start()  # go to passive mode - want to do this
@@ -688,6 +565,33 @@ class Create:
         """
         self.setPose(0.0,0.0,0.0)
     
+    def _integrateNextOdometricStep(self, lEncoder, rEncoder):
+        if self.leftEncoder == -1:
+            self.leftEncoder = lEncoder
+            self.rightEncoder = rEncoder
+            return
+        left_diff  = self.leftEncoder-lEncoder
+        right_diff = self.rightEncoder-rEncoder
+        #TODO handle wrap around.
+        left_mm = left_diff / TICK_PER_MM_LEFT;
+        right_mm = right_diff / TICK_PER_MM_RIGHT;
+
+        distance = (left_mm + right_mm) / 2;
+
+        self.thrPose += (right_mm - left_mm) / WHEEL_SPAN;
+
+        if self.thrPose > math.pi:
+            self.thrPose -= 2*math.pi
+        if self.thrPose < -math.pi:
+            self.thrPose += 2*math.pi
+
+        self.xPose += distance * math.cos(self.thrPose)
+        self.yPose += distance * math.sin(self.thrPose)        
+
+        self.leftEncoder = lEncoder
+        self.rightEncoder = rEncoder
+
+
     def _integrateNextOdometricStepCreate(self, distance, rawAngle):
         """ integrateNextOdometricStep adds the reported inputs
         distance in mm
@@ -1384,6 +1288,8 @@ class Create:
         startofdata = 0
         distance = 0
         angle = 0
+        encoder_left = 0
+        encoder_right = 0
         for sensorNum in sensor_data_list:
             width = SENSOR_DATA_WIDTH[sensorNum]
             dataGetter = sensorDataInterpreter[sensorNum]
@@ -1432,20 +1338,22 @@ class Create:
             # handle special cases
             if (sensorNum == DISTANCE):
                 distance = interpretedData
-                if self._debug == True:  # james' change
-                    print distance
             if (sensorNum == ANGLE):
                 angle = interpretedData
-                if self._debug == True:  # james' change
-                    print angle
-                
+            
+            if (sensorNum == ENCODER_LEFT):
+                encoder_left = interpretedData
+            if (sensorNum == ENCODER_RIGHT):
+                encoder_right = interpretedData
+
             #resultingValues.append(interpretedData)
             # update index for next sensor...
             startofdata = startofdata + width
         
-        if (distance != 0 or angle != 0):
-            self._integrateNextOdometricStepCreate(distance,angle)
-            
+        # if (distance != 0 or angle != 0):
+        #     self._integrateNextOdometricStepCreate(distance,angle)
+        if encoder_left !=0 and encoder_right!=0:
+            self._integrateNextOdometricStep(encoder_left, encoder_right)            
         self.sensord[POSE] = self.getPose(dist='cm',angle='deg')
 
 
@@ -1517,142 +1425,6 @@ class Create:
         # no response here, so we don't get any...
         return
 
-    
-    def _interpretSensorString( self, r ):
-        """ This returns a sensorFrame object with its fields
-        filled in from the raw sensor return string, r, which
-        has to be the full 3-packet (26-byte) string.
-        
-        r is obtained by writing [142][0] to the serial port.
-        """
-        # check length
-        # we should save a bit of time by handling each sub-string
-        # appropriately, but we don't do this yet...
-        if len(r) != 26:
-            #print 'You have input an incorrectly formatted string to'
-            #print 'sensorStatus. It needs to have 26 bytes (full sensors).'
-            #print 'The input is', r
-            return
-        
-        s = SensorFrame()
-        
-        # convert r so that it is a list of 26 ints instead of 26 chrs
-        r = [ ord(c) for c in r ]
-        
-        # packet number 1 (10 bytes)
-        
-        # byte 0: bumps and wheeldrops
-        s.casterDrop = _bitOfByte( 4, r[0] )
-        s.leftWheelDrop = _bitOfByte( 3, r[0] )
-        s.rightWheelDrop = _bitOfByte( 2, r[0] )
-        s.leftBump = _bitOfByte( 1, r[0] )
-        s.rightBump = _bitOfByte( 0, r[0] )
-        
-        # byte 1: wall sensor, the IR looking to the right
-        s.wallSensor = _bitOfByte( 0, r[1] )
-        
-        # byte 2: left cliff sensor
-        s.leftCliff = _bitOfByte( 0, r[2] )
-        
-        # byte 3: front left cliff sensor
-        s.frontLeftCliff = _bitOfByte( 0, r[3] )
-        
-        # byte 4: front right cliff sensor
-        s.frontRightCliff = _bitOfByte( 0, r[4] )
-        
-        # byte 5: right cliff sensor
-        s.rightCliff = _bitOfByte( 0, r[5] )
-        
-        # byte 6: virtual wall detector (the separate unit)
-        s.virtualWall = _bitOfByte( 0, r[6] )
-        
-        # byte 7: motor overcurrents byte
-        s.driveLeft = _bitOfByte( 4, r[7] )
-        s.driveRight = _bitOfByte( 3, r[7] )
-        s.mainBrush = _bitOfByte( 2, r[7] )
-        s.vacuum = _bitOfByte( 1, r[7] )
-        s.sideBrush = _bitOfByte( 0, r[7] )
-        
-        # byte 8: dirt detector left
-        # the dirt-detecting sensors are acoustic impact sensors
-        # basically, they hear the dirt (or don't) going by toward the back
-        # this value ranges from 0 (no dirt) to 255 (lots of dirt)
-        s.leftDirt = r[8]
-        
-        # byte 9: dirt detector right
-        # some roomba's don't have the right dirt detector
-        # the dirt detectors are metallic disks near the brushes
-        s.rightDirt = r[9]
-        
-        # packet number 2 (6 bytes)
-        
-        # byte 10: remote control command
-        # this is the value of the remote control command currently
-        # being seen by the roomba, it is 255 if there is no command
-        # not all roombas have a remote control...
-        s.remoteControlCommand = r[10]
-        
-        # byte 11: button presses
-        s.powerButton = _bitOfByte( 3, r[11] )
-        s.spotButton = _bitOfByte( 2, r[11] )
-        s.cleanButton = _bitOfByte( 1, r[11] )
-        s.maxButton = _bitOfByte( 0, r[11] )
-        
-        # bytes 12 and 13: distance
-        # the distance that roomba has traveled, in mm, since the
-        # last time this data was requested (not from a SensorFrame,
-        # but from the roomba)
-        # It will stay at the max or min (32767 or -32768) if
-        # not polled often enough, i.e., it then means "a long way"
-        # It is the sum of the two drive wheels' distances, divided by 2
-        s.distance = _twosComplementInt2bytes( r[12], r[13] )
-        
-        # bytes 14 and 15: angle
-        s.rawAngle = _twosComplementInt2bytes( r[14], r[15] )
-        # the distance between the wheels is 258 mm
-        s.angleInRadians = 2.0 * s.rawAngle / WHEEL_SPAN
-        
-        # packet number 3 (10 bytes)
-        
-        # byte 16: charging state
-        # 0 == not charging
-        # 1 == charging recovery
-        # 2 == charging
-        # 3 == trickle charging
-        # 4 == waiting
-        # 5 == charging error
-        s.chargingState = r[16]
-        
-        # bytes 17 and 18: voltage in millivolts
-        # this is unsigned, so we don't use two's complement
-        s.voltage = r[17] << 8 | r[18]
-        # check this for byte order!!
-        
-        # bytes 19 and 20: current in milliamps
-        # this is signed, from -32768 to 32767
-        # negative currents are flowing out of the battery
-        # positive currents are flowing into the battery (charging)
-        s.current = _twosComplementInt2bytes( r[19], r[20] )
-        
-        # byte 21: temperature of the battery
-        # this is in degrees celsius
-        s.temperature = _twosComplementInt1byte( r[21] )
-        
-        # bytes 22 and 23: charge of the battery in milliamp-hours
-        # this is two unsigned bytes
-        s.charge = r[22] << 8 | r[23]
-        
-        # bytes 24 and 25: estimated capacity of the roomba's battery
-        # in units of milliamp-hours
-        # when the charge reaches this value, the battery is
-        # considered fully charged
-        s.capacity = r[24] << 8 | r[25]
-        
-        # OK, here we call a function to integrate the odometric
-        # step taken here (unless distance and rawAngle are 0)
-        self._integrateNextOdometricStepCreate(s.distance,s.rawAngle)
-        
-        return s
     
     # Some new stuff added by Sean
     
