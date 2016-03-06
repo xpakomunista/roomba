@@ -130,10 +130,12 @@ SENSOR_DATA_WIDTH = [0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,2,2,1,2,2,1,2,2,2,2,2
 #The original value was 258.0 but my roomba has 235.0
 WHEEL_SPAN = 235.0
 WHEEL_DIAMETER = 72.0
-TICK_PER_REVOLUTION = 508.8
-TICK_PER_MM_LEFT = TICK_PER_REVOLUTION/(math.pi*WHEEL_DIAMETER)
-TICK_PER_MM_RIGHT = TICK_PER_REVOLUTION/(math.pi*WHEEL_DIAMETER)
+TICK_PER_REVOLUTION = 508.8 # original 508.8
+TICK_PER_MM = TICK_PER_REVOLUTION/(math.pi*WHEEL_DIAMETER)
 
+# on my floor, a full turn is measured as sth like 450 deg
+# add an error to the computation to account for that.
+ANGULAR_ERROR = 360.0/450.0
 
 # for printing the SCI modes
 def modeStr( mode ):
@@ -438,7 +440,7 @@ class Create:
     if it's not attached!
     """
     # to do: check if we can start in other modes...
-    def __init__(self, PORT, startingMode=SAFE_MODE):
+    def __init__(self, PORT, BAUD_RATE=115200, startingMode=SAFE_MODE):
         """ the constructor which tries to open the
         connection to the robot at port PORT
         """
@@ -460,11 +462,11 @@ class Create:
             else:
                 # for Mac/Linux - use whole port name
                 # print 'In Mac/Linux mode...'
-                self.ser = serial.Serial(PORT, baudrate=115200, timeout=0.5)
+                self.ser = serial.Serial(PORT, baudrate=BAUD_RATE, timeout=0.5)
         # otherwise, we try to open the numeric serial port...
         else:
             # print 'In Windows mode...'
-            self.ser = serial.Serial(PORT-1, baudrate=57600, timeout=0.5)
+            self.ser = serial.Serial(PORT-1, baudrate=BAUD_RATE, timeout=0.5)
         
         # did the serial port actually open?
         if self.ser != 'sim' and self.ser.isOpen():
@@ -492,6 +494,8 @@ class Create:
         self.thrPose = 0.0
         self.leftEncoder = -1
         self.rightEncoder = -1
+        self.leftEncoder_old = -1
+        self.rightEncoder_old = -1
         
         time.sleep(0.3)
         self._start()  # go to passive mode - want to do this
@@ -565,31 +569,43 @@ class Create:
         """
         self.setPose(0.0,0.0,0.0)
     
-    def _integrateNextOdometricStep(self, lEncoder, rEncoder):
-        if self.leftEncoder == -1:
-            self.leftEncoder = lEncoder
-            self.rightEncoder = rEncoder
+    def _getEncoderDelta(self, oldEnc, newEnc):
+        #encoder wrap around at 2^16
+        #check if the step is bigger than half the 
+        #possible range and treat this as wraparound
+        delta = newEnc-oldEnc
+        if delta< -65536/2:
+            delta = (newEnc+65536)-oldEnc
+        if delta> 65536/2:
+            delta = newEnc-(oldEnc+65536)
+        return delta
+
+    def _integrateNextEncoderStep(self):
+        if self.leftEncoder_old == -1:
+            self.leftEncoder_old = self.leftEncoder
+            self.rightEncoder_old = self.rightEncoder
             return
-        left_diff  = self.leftEncoder-lEncoder
-        right_diff = self.rightEncoder-rEncoder
-        #TODO handle wrap around.
-        left_mm = left_diff / TICK_PER_MM_LEFT;
-        right_mm = right_diff / TICK_PER_MM_RIGHT;
+        left_diff  = self._getEncoderDelta(self.leftEncoder_old,self.leftEncoder)
+        right_diff = self._getEncoderDelta(self.rightEncoder_old,self.rightEncoder)
 
-        distance = (left_mm + right_mm) / 2;
+        left_mm = left_diff / TICK_PER_MM;
+        right_mm = right_diff / TICK_PER_MM;
 
-        self.thrPose += (right_mm - left_mm) / WHEEL_SPAN;
-
-        if self.thrPose > math.pi:
-            self.thrPose -= 2*math.pi
-        if self.thrPose < -math.pi:
-            self.thrPose += 2*math.pi
+        distance = (left_mm + right_mm) / 2.0;        
+        dAngle = (right_mm - left_mm) / WHEEL_SPAN
+        dAngle *= ANGULAR_ERROR
+        self.thrPose += dAngle
+        
+        if self.thrPose > 100*math.pi:
+            self.thrPose -= 101*math.pi
+        if self.thrPose < -100*math.pi:
+            self.thrPose += 101*math.pi
 
         self.xPose += distance * math.cos(self.thrPose)
         self.yPose += distance * math.sin(self.thrPose)        
 
-        self.leftEncoder = lEncoder
-        self.rightEncoder = rEncoder
+        self.leftEncoder_old = self.leftEncoder
+        self.rightEncoder_old = self.rightEncoder
 
 
     def _integrateNextOdometricStepCreate(self, distance, rawAngle):
@@ -613,7 +629,7 @@ class Create:
         # perhaps there's nothing to do...
         if distance == 0 and rawAngle == 0:
             return
-        
+        print rawAngle
         # then again, maybe there is something to do...
         dthr = math.radians(rawAngle)  # angle traveled
         d = distance              # distance traveled
@@ -767,7 +783,6 @@ class Create:
         used if roomba_radius_mm == 0 (or rounds down to 0)
         other drive-related calls are available
         """
-        #self.sensors([POSE])   # updated by Sean
 
         # first, they should be ints
         #   in case they're being generated mathematically
@@ -788,8 +803,7 @@ class Create:
         if roomba_radius_mm < -2000:
             roomba_radius_mm = 32768
         if roomba_radius_mm > 2000:
-            roomba_radius_mm = 32768
-        
+            roomba_radius_mm = 32768        
         # get the two bytes from the velocity
         # these come back as numbers, so we will chr them
         velHighVal, velLowVal = _toTwosComplement2Bytes( roomba_mm_sec )
@@ -1172,7 +1186,7 @@ class Create:
         """ convenience function to show sensed data in d 
         if d is None, the current self.sensord is used instead
         """
-        self.sensors([LEFT_BUMP,RIGHT_BUMP,LEFT_WHEEL_DROP,RIGHT_WHEEL_DROP,CENTER_WHEEL_DROP,WALL_IR_SENSOR,CLIFF_LEFT,CLIFF_FRONT_LEFT,CLIFF_FRONT_RIGHT,CLIFF_RIGHT,VIRTUAL_WALL,LEFT_WHEEL_OVERCURRENT,RIGHT_WHEEL_OVERCURRENT,INFRARED_BYTE,PLAY_BUTTON,ADVANCE_BUTTON,POSE,CHARGING_STATE,VOLTAGE,CURRENT,BATTERY_TEMP,BATTERY_CHARGE,BATTERY_CAPACITY,WALL_SIGNAL,CLIFF_LEFT_SIGNAL,CLIFF_FRONT_LEFT_SIGNAL,CLIFF_FRONT_RIGHT_SIGNAL,CLIFF_RIGHT_SIGNAL,OI_MODE,SONG_NUMBER,SONG_PLAYING,CHARGING_SOURCES_AVAILABLE])
+        self.sensors([LEFT_BUMP,RIGHT_BUMP,LEFT_WHEEL_DROP,RIGHT_WHEEL_DROP,CENTER_WHEEL_DROP,WALL_IR_SENSOR,CLIFF_LEFT,CLIFF_FRONT_LEFT,CLIFF_FRONT_RIGHT,CLIFF_RIGHT,VIRTUAL_WALL,LEFT_WHEEL_OVERCURRENT,RIGHT_WHEEL_OVERCURRENT,INFRARED_BYTE,PLAY_BUTTON,ADVANCE_BUTTON,POSE,CHARGING_STATE,VOLTAGE,CURRENT,BATTERY_TEMP,BATTERY_CHARGE,BATTERY_CAPACITY,WALL_SIGNAL,CLIFF_LEFT_SIGNAL,CLIFF_FRONT_LEFT_SIGNAL,CLIFF_FRONT_RIGHT_SIGNAL,CLIFF_RIGHT_SIGNAL,OI_MODE,SONG_NUMBER,SONG_PLAYING,CHARGING_SOURCES_AVAILABLE, ENCODER_LEFT, ENCODER_RIGHT,LIGHTBUMP_LEFT,LIGHTBUMP_FRONT_LEFT,LIGHTBUMP_CENTER_LEFT,LIGHTBUMP_CENTER_RIGHT,LIGHTBUMP_FRONT_RIGHT,LIGHTBUMP_RIGHT,LIGHTBUMP])
         d = self.sensord
         pose = d[POSE]
         
@@ -1288,8 +1302,8 @@ class Create:
         startofdata = 0
         distance = 0
         angle = 0
-        encoder_left = 0
-        encoder_right = 0
+        update_pose = False
+
         for sensorNum in sensor_data_list:
             width = SENSOR_DATA_WIDTH[sensorNum]
             dataGetter = sensorDataInterpreter[sensorNum]
@@ -1335,6 +1349,9 @@ class Create:
                 self.sensord[ADVANCE_BUTTON] = interpretedData[0]
                 self.sensord[PLAY_BUTTON] = interpretedData[1]
             
+            if sensorNum == DIRT_DETECTED:
+                self.sensord[DIRT_DETECTED] = interpretedData
+                
             # handle special cases
             if (sensorNum == DISTANCE):
                 distance = interpretedData
@@ -1342,18 +1359,20 @@ class Create:
                 angle = interpretedData
             
             if (sensorNum == ENCODER_LEFT):
-                encoder_left = interpretedData
+                self.leftEncoder = interpretedData
+                update_pose = True
             if (sensorNum == ENCODER_RIGHT):
-                encoder_right = interpretedData
+                self.rightEncoder = interpretedData
+                update_pose = True
 
             #resultingValues.append(interpretedData)
             # update index for next sensor...
             startofdata = startofdata + width
         
-        # if (distance != 0 or angle != 0):
-        #     self._integrateNextOdometricStepCreate(distance,angle)
-        if encoder_left !=0 and encoder_right!=0:
-            self._integrateNextOdometricStep(encoder_left, encoder_right)            
+        #if (distance != 0 or angle != 0):
+        #    self._integrateNextOdometricStepCreate(distance,angle)
+        if update_pose == True:
+             self._integrateNextEncoderStep()
         self.sensord[POSE] = self.getPose(dist='cm',angle='deg')
 
 
