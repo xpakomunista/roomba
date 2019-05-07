@@ -1,6 +1,6 @@
 #
 # create.py
-#
+# 
 # Python interface for the iRobot Create
 # Licensed as Artistic License
 #
